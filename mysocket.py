@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import struct
 
 TCP_FLAGS_SYN = 0x02
 TCP_FLAGS_RST = 0x04
@@ -25,12 +26,13 @@ from headers import IPv4Header, UDPHeader, TCPHeader, \
         IP_HEADER_LEN, UDP_HEADER_LEN, TCP_HEADER_LEN, \
         TCPIP_HEADER_LEN, UDPIP_HEADER_LEN
 
+from cougarnet.util import \
+        ip_str_to_binary, ip_binary_to_str
+
 
 #From /usr/include/linux/in.h:
 IPPROTO_TCP = 6 # Transmission Control Protocol
 IPPROTO_UDP = 17 # User Datagram Protocol
-
-loop = asyncio.get_event_loop()
 
 class UDPSocket:
     def __init__(self, local_addr: str, local_port: int,
@@ -73,6 +75,7 @@ class UDPSocket:
     def send_packet(self, remote_addr: str, remote_port: int,
             data: bytes) -> None:
 
+
         pkt = self.create_packet(self._local_addr, self._local_port,
                 remote_addr, remote_port, data)
         self._send_ip_packet(pkt)
@@ -82,7 +85,6 @@ class UDPSocket:
 
     def sendto(self, data: bytes, remote_addr: str, remote_port: int) -> None:
         self.send_packet(remote_addr, remote_port, data)
-
 
 
 class TCPSocketBase:
@@ -134,6 +136,7 @@ class TCPListenerSocket(TCPSocketBase):
                     ip_hdr.src, tcp_hdr.sport, sock)
 
             sock.handle_packet(pkt)
+
 
 class TCPSocket(TCPSocketBase):
     def __init__(self, local_addr: str, local_port: int,
@@ -228,26 +231,15 @@ class TCPSocket(TCPSocketBase):
         sock.initiate_connection()
 
         return sock
-    
-    # def bypass_handshake(self, base_seq_self: int, base_seq_other: int):
-    #     '''
-    #     Bypass the TCP three-way handshake.  Allocate a TCPReceiveBuffer
-    #     instance, and initialize it with the base sequence number of the peer
-    #     on the other side of the connection.
-
-    #     Normally this is done in in handle_syn() (after the SYN is received)
-    #     for the server and in handle_synack() (after the SYNACK is received) in
-    #     the client.
-    #     '''
-    #     self.base_seq_self = base_seq_self
-    #     self.seq = base_seq_self + 1
-    #     self.send_buffer = TCPSendBuffer(self.base_seq_self + 1)
-
-    #     self.base_seq_other = base_seq_other
-    #     self.ack = base_seq_other + 1
-    #     self.receive_buffer = TCPReceiveBuffer(self.base_seq_other + 1)
 
     def handle_packet(self, pkt: bytes) -> None:
+        '''
+        Handle an incoming packet corresponding to this connection.  If the
+        connection is not yet established, then continue connection
+        establishment.  For an established connection, handle any payload data
+        (TCP segment) and any data acknowledged.
+        '''
+
         ip_hdr = IPv4Header.from_bytes(pkt[:IP_HEADER_LEN])
         tcp_hdr = TCPHeader.from_bytes(pkt[IP_HEADER_LEN:TCPIP_HEADER_LEN])
         data = pkt[TCPIP_HEADER_LEN:]
@@ -301,8 +293,7 @@ class TCPSocket(TCPSocketBase):
         if tcp_hdr.flags & TCP_FLAGS_SYN:
             self.base_seq_other = tcp_hdr.seq
 
-            # Modification to incorporate receive buffer for dynamic 3-way handshake
-            self.ack = tcp_hdr.seq + 1
+            self.ack = tcp_hdr.seq + 1  # Modification to incorporate receive buffer for dynamic 3-way handshake
             self.receive_buffer = TCPReceiveBuffer(self.base_seq_other + 1)
 
             self.send_packet(self.base_seq_self, self.base_seq_other + 1, flags=TCP_FLAGS_SYN | TCP_FLAGS_ACK)
@@ -326,7 +317,6 @@ class TCPSocket(TCPSocketBase):
         data = pkt[TCPIP_HEADER_LEN:]
 
         if tcp_hdr.flags & (TCP_FLAGS_SYN | TCP_FLAGS_ACK) and tcp_hdr.ack == self.base_seq_self + 1:
-            
             self.base_seq_other = tcp_hdr.seq
 
             # Modification to incorporate receive buffer for dynamic 3-way handshake
