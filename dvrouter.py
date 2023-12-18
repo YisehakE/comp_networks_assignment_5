@@ -19,7 +19,7 @@ from forwarding_table import ForwardingTable
 
 class DVRouter(TransportHost):
     def __init__(self):
-        super(DVRouter, self).__init__()
+        super(DVRouter, self).__init__(True)
 
         self.my_dv = {}
         self.neighbor_dvs = {}
