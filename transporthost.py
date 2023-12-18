@@ -10,7 +10,7 @@ from mysocket import UDPSocket, TCPSocketBase
 
 class TransportHost(Host):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super(TransportHost, self).__init__(*args, **kwargs)
 
         self.socket_mapping_udp = {}
         self.socket_mapping_tcp = {}
