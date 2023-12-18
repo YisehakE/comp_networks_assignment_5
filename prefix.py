@@ -1,35 +1,35 @@
 '''
 Test the Prefix.__contains__() method
 >>> '10.20.0.1' in Prefix('10.20.0.0/23')
-False
+True
 >>> '10.20.1.0' in Prefix('10.20.0.0/23')
-False
+True
 >>> '10.20.1.255' in Prefix('10.20.0.0/23')
-False
+True
 >>> '10.20.2.0' in Prefix('10.20.0.0/23')
 False
 >>> '10.20.0.1' in Prefix('10.20.0.0/24')
-False
+True
 >>> '10.20.0.255' in Prefix('10.20.0.0/24')
-False
+True
 >>> '10.20.1.0' in Prefix('10.20.0.0/24')
 False
 >>> '10.20.0.1' in Prefix('10.20.0.0/25')
-False
+True
 >>> '10.20.0.127' in Prefix('10.20.0.0/25')
-False
+True
 >>> '10.20.0.128' in Prefix('10.20.0.0/25')
 False
 >>> '10.20.0.1' in Prefix('10.20.0.0/26')
-False
+True
 >>> '10.20.0.63' in Prefix('10.20.0.0/26')
-False
+True
 >>> '10.20.0.64' in Prefix('10.20.0.0/26')
 False
 >>> '10.20.0.1' in Prefix('10.20.0.0/27')
-False
+True
 >>> '10.20.0.31' in Prefix('10.20.0.0/27')
-False
+True
 >>> '10.20.0.32' in Prefix('10.20.0.0/27')
 False
 '''
@@ -41,7 +41,7 @@ int_type_int = type(0xff)
 int_type_long = type(0xffffffffffffffff)
 
 
-def ip_int_to_str(address, family):
+def ip_int_to_str(address: int, family: int) -> str:
     '''Convert an integer value to an IP address string, in presentation
     format.
 
@@ -62,7 +62,7 @@ def ip_int_to_str(address, family):
     return socket.inet_ntop(family,
             binascii.unhexlify(('%x' % address).zfill(address_len >> 2)))
 
-def ip_str_to_int(address):
+def ip_str_to_int(address: str) -> int:
     '''Convert an IP address string, in presentation format, to an integer.
     address:
 
@@ -82,7 +82,7 @@ def ip_str_to_int(address):
     return int_type_long(
             binascii.hexlify(socket.inet_pton(family, address)), 16)
 
-def all_ones(n):
+def all_ones(n: int) -> int:
     '''Return an int that is value the equivalent of having only the least
     significant n bits set.  Any bits more significant are not set.  This is a
     helper function for other IP address manipulation functions.
@@ -106,7 +106,7 @@ def all_ones(n):
 
     return 2**n - 1
 
-def ip_prefix_mask(family, prefix_len):
+def ip_prefix_mask(family: int, prefix_len: int) -> int:
     '''Return prefix mask for the given address family and prefix length, as an
     int.  The prefix_len most-significant bits should be set, and the remaining
     (least significant) bits should not be set.  The total number of bits in
@@ -137,9 +137,14 @@ def ip_prefix_mask(family, prefix_len):
     '''
 
     #FIXME
-    return 0
+    if family == socket.AF_INET:
+        address_bits = 32
+    else:
+        address_bits = 128
+    return (all_ones(address_bits) << (address_bits - prefix_len)) & \
+            all_ones(address_bits)
 
-def ip_prefix(address, family, prefix_len):
+def ip_prefix(address: int, family: int, prefix_len: int) -> int:
     '''Return the prefix for the given IP address, address family, and
     prefix length, as an int.  The prefix_len most-significant bits
     from the IP address should be preserved in the prefix, and the
@@ -169,9 +174,13 @@ def ip_prefix(address, family, prefix_len):
     '''
 
     #FIXME
-    return 0
+    if family == socket.AF_INET6:
+        address_len = 128
+    else:
+        address_len = 32
+    return address & ip_prefix_mask(family, prefix_len)
 
-def ip_prefix_total_addresses(family, prefix_len):
+def ip_prefix_total_addresses(family: int, prefix_len: int) -> int:
     '''Return the total number IP addresses (_including_ the first and
     last addresses within an IPv4 subnet, which cannot be used by a host
     or router on that subnet) for the given address family and prefix
@@ -193,9 +202,14 @@ def ip_prefix_total_addresses(family, prefix_len):
     '''
 
     #FIXME
-    return 0
+    if family == socket.AF_INET6:
+        address_len = 128
+    else:
+        address_len = 32
+    return 2**(address_len - prefix_len)
 
-def ip_prefix_nth_address(prefix, family, prefix_len, n):
+def ip_prefix_nth_address(prefix: int, family: int,
+        prefix_len: int, n: int) -> int:
     '''Return the nth IP address within the prefix specified with the given
     prefix, address family, and prefix length, as an int.  The prefix_len
     most-significant bits from the from the prefix should be preserved in the
@@ -226,9 +240,9 @@ def ip_prefix_nth_address(prefix, family, prefix_len, n):
     '''
 
     #FIXME
-    return 0
+    return prefix + n
 
-def ip_prefix_last_address(prefix, family, prefix_len):
+def ip_prefix_last_address(prefix: int, family: int, prefix_len: int) -> int:
     '''Return the last IP address within the prefix specified with the given
     prefix, address family, and prefix length, as an int.  The prefix_len
     most-significant bits from the from the prefix should be preserved in the
@@ -259,7 +273,8 @@ def ip_prefix_last_address(prefix, family, prefix_len):
     '''
 
     #FIXME
-    return 0
+    return ip_prefix_nth_address(prefix, family, prefix_len,
+            ip_prefix_total_addresses(family, prefix_len) - 1)
 
 
 class Prefix:
@@ -267,7 +282,7 @@ class Prefix:
     address family (int).
     '''
 
-    def __init__(self, prefix):
+    def __init__(self, prefix: str):
         if ':' in prefix:
             family = socket.AF_INET6
         else:
@@ -285,14 +300,14 @@ class Prefix:
         self.prefix_len = prefix_len
         self.family = family
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return str(self)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return '%s/%d' % \
                 (ip_int_to_str(self.prefix, self.family), self.prefix_len)
 
-    def __contains__(self, address):
+    def __contains__(self, address: str) -> bool:
         '''Return True if the address corresponding to this IP address is
         within this prefix, False otherwise.
 
@@ -310,7 +325,9 @@ class Prefix:
         address = ip_str_to_int(address)
 
         #FIXME
-        return False
+        prefix1 = ip_prefix(self.prefix, self.family, self.prefix_len)
+        prefix2 = ip_prefix(address, self.family, self.prefix_len)
+        return prefix1 == prefix2
 
     def __hash__(self):
         return hash((self.prefix, self.prefix_len))
