@@ -74,7 +74,7 @@ class UDPSocket:
 
     def send_packet(self, remote_addr: str, remote_port: int,
             data: bytes) -> None:
-
+        
 
         pkt = self.create_packet(self._local_addr, self._local_port,
                 remote_addr, remote_port, data)
@@ -219,7 +219,7 @@ class TCPSocket(TCPSocketBase):
             notify_on_data_func: callable,
             fast_retransmit: bool=False, initial_cwnd: int=1000,
             mss: int=1000,
-            congestion_control='none') -> TCPSocket:
+            congestion_control: str='none') -> TCPSocketBase:
         sock = cls(local_addr, local_port,
                 remote_addr, remote_port,
                 TCP_STATE_CLOSED,
@@ -255,14 +255,8 @@ class TCPSocket(TCPSocketBase):
                 # handle ACK
                 self.handle_ack(pkt)
 
-
     def initialize_seq(self) -> int:
-        '''
-        Initialize the sequence number used by our side of the connection.
-        '''
-
         return random.randint(0, 65535)
-
 
     def initiate_connection(self) -> None:
         '''
@@ -292,10 +286,8 @@ class TCPSocket(TCPSocketBase):
 
         if tcp_hdr.flags & TCP_FLAGS_SYN:
             self.base_seq_other = tcp_hdr.seq
-
-            self.ack = tcp_hdr.seq + 1  # Modification to incorporate receive buffer for dynamic 3-way handshake
+            self.ack = tcp_hdr.seq + 1
             self.receive_buffer = TCPReceiveBuffer(self.base_seq_other + 1)
-
             self.send_packet(self.base_seq_self, self.base_seq_other + 1, flags=TCP_FLAGS_SYN | TCP_FLAGS_ACK)
             self.state = TCP_STATE_SYN_RECEIVED
 
@@ -316,13 +308,11 @@ class TCPSocket(TCPSocketBase):
         tcp_hdr = TCPHeader.from_bytes(pkt[IP_HEADER_LEN:TCPIP_HEADER_LEN])
         data = pkt[TCPIP_HEADER_LEN:]
 
-        if tcp_hdr.flags & (TCP_FLAGS_SYN | TCP_FLAGS_ACK) and tcp_hdr.ack == self.base_seq_self + 1:
+        if tcp_hdr.flags & (TCP_FLAGS_SYN | TCP_FLAGS_ACK) and \
+                tcp_hdr.ack == self.base_seq_self + 1:
             self.base_seq_other = tcp_hdr.seq
-
-            # Modification to incorporate receive buffer for dynamic 3-way handshake
             self.ack = tcp_hdr.seq + 1
             self.receive_buffer = TCPReceiveBuffer(self.base_seq_other + 1)
-
             self.send_packet(self.base_seq_self + 1, self.base_seq_other + 1, flags=TCP_FLAGS_ACK)
             self.state = TCP_STATE_ESTABLISHED
 
@@ -332,31 +322,27 @@ class TCPSocket(TCPSocketBase):
         data = pkt[TCPIP_HEADER_LEN:]
 
         if tcp_hdr.ack == self.base_seq_self + 1:
-            
-            # Modification to set ack after incorporating receive buffer
             self.ack = tcp_hdr.seq + 1
             self.state = TCP_STATE_ESTABLISHED
 
-
     def continue_connection(self, pkt: bytes) -> None:
-          if self.state == TCP_STATE_LISTEN:
-              self.handle_syn(pkt)
-          elif self.state == TCP_STATE_SYN_SENT:
-              self.handle_synack(pkt)
-          elif self.state == TCP_STATE_SYN_RECEIVED:
-              self.handle_ack_after_synack(pkt)
+        if self.state == TCP_STATE_LISTEN:
+            self.handle_syn(pkt)
+        elif self.state == TCP_STATE_SYN_SENT:
+            self.handle_synack(pkt)
+        elif self.state == TCP_STATE_SYN_RECEIVED:
+            self.handle_ack_after_synack(pkt)
 
-          if self.state == TCP_STATE_ESTABLISHED:
-              pass
-
+        if self.state == TCP_STATE_ESTABLISHED:
+            pass
 
     def send_data(self, data: bytes, flags: int=0) -> None:
         pass
 
-    
     @classmethod
     def create_packet(cls, src: str, sport: int, dst: str, dport: int,
             seq: int, ack: int, flags: int, data: bytes=b'') -> bytes:
+
         data_len = len(data)
         pkt_len = TCPIP_HEADER_LEN + data_len
         pkt_ttl = 64
@@ -371,7 +357,6 @@ class TCPSocket(TCPSocketBase):
         tcp_hdr_bytes = tcp_hdr.to_bytes()
 
         return ip_hdr_bytes + tcp_hdr_bytes + data
-
 
     def send_packet(self, seq: int, ack: int, flags: int,
             data: bytes=b'') -> None:
@@ -413,7 +398,6 @@ class TCPSocket(TCPSocketBase):
             # set a timer
             if self.timer is None:
                 self.start_timer()
-
 
     def send(self, data: bytes) -> None:
         self.send_buffer.put(data)

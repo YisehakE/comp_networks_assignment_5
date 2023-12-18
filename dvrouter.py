@@ -19,15 +19,13 @@ from forwarding_table import ForwardingTable
 
 class DVRouter(TransportHost):
     def __init__(self):
-        super(DVRouter, self).__init__(True)
+        super().__init__(True)
 
         self.my_dv = {}
         self.neighbor_dvs = {}
         self._dv_socks = {}
 
         self._initialize_dv_sock()
-
-        # Do any further initialization here
 
         self._link_down_alarm = {}
         self._neighbor_name_to_ip = {}
@@ -160,17 +158,10 @@ class DVRouter(TransportHost):
         # NEW WAY: Translate ips address to correlating prefixes
         for intinfo in self.int_to_info.values():
             if intinfo.ipv4_addrs:
-                ip_addr = intinfo.ipv4_addrs[0]
-                prefix_len = intinfo.ipv4_prefix_len
-
+                ip_addr, prefix_len= intinfo.ipv4_addrs[0], intinfo.ipv4_prefix_len
                 int = ip_str_to_int(ip_addr)
-                prefix_int = ip_prefix(int, 
-                                       socket.AF_INET, 
-                                       prefix_len
-                                       )
-                
+                prefix_int = ip_prefix(int, socket.AF_INET, prefix_len)
                 prefix_str = ip_int_to_str(prefix_int, socket.AF_INET) + "/" + str(prefix_len)
-
                 dv[prefix_str] = 0 # Store as prefix
 
         for neighbor in self.neighbor_dvs:
