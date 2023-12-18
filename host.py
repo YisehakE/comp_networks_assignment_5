@@ -6,6 +6,7 @@ import json
 import os
 import socket
 import sys
+from prefix import *
 
 from cougarnet.sim.host import BaseHost
 from cougarnet.util import \
@@ -13,7 +14,6 @@ from cougarnet.util import \
         ip_str_to_binary, ip_binary_to_str
 
 from forwarding_table import ForwardingTable
-from prefix import *
 
 #FIXME
 from scapy.all import Ether, IP, ARP
@@ -54,7 +54,8 @@ class Host(BaseHost):
 
     def _handle_frame(self, frame, intf):
         eth = Ether(frame)
-        if eth.dst == 'ff:ff:ff:ff:ff:ff' or eth.dst == self.int_to_info[intf].mac_addr:
+        if eth.dst == 'ff:ff:ff:ff:ff:ff' or \
+                eth.dst == self.int_to_info[intf].mac_addr:
 
             if eth.type == ETH_P_IP:
                 self.handle_ip(bytes(eth.payload), intf)
@@ -66,12 +67,12 @@ class Host(BaseHost):
     def handle_ip(self, pkt, intf):
         ip = IP(pkt)
         all_addrs = []
-        ip_bcast = self.bcast_for_int(intf)
 
         for intf1 in self.int_to_info:
             all_addrs += self.int_to_info[intf1].ipv4_addrs
 
-        if ip.dst == '255.255.255.255' or ip.dst == ip_bcast or ip.dst in all_addrs:
+        if ip.dst == self.bcast_for_int(intf) or  ip.dst == '255.255.255.255' or \
+                ip.dst in all_addrs:
             if ip.proto == IPPROTO_TCP:
                 self.handle_tcp(pkt)
             elif ip.proto == IPPROTO_UDP:
@@ -115,13 +116,11 @@ class Host(BaseHost):
     def send_packet_on_int(self, pkt, intf, next_hop):
         print(f'Attempting to send packet on {intf} with next hop {next_hop}:\n{repr(pkt)}')
 
-        ip_bcast = self.bcast_for_int(intf)
-        eth, frame, arp = None, None, None
-
-        if ip_bcast == next_hop:
+        if self.bcast_for_int(intf) == next_hop:                                               
             eth = Ether(src=self.int_to_info[intf].mac_addr, dst='ff:ff:ff:ff:ff:ff', type=ETH_P_IP)
             frame = eth / pkt
-            self.send_frame(bytes(frame), intf)    
+            self.send_frame(bytes(frame), intf)
+        
         elif next_hop in self._arp_table:
             eth = Ether(src=self.int_to_info[intf].mac_addr, dst=self._arp_table[next_hop], type=ETH_P_IP)
             frame = eth / pkt
@@ -137,6 +136,7 @@ class Host(BaseHost):
 
     def send_packet(self, pkt):
         print(f'Attempting to send packet:\n{repr(pkt)}')
+
         ip = IP(pkt)
         intf, next_hop = self.forwarding_table.get_entry(ip.dst)
         if next_hop is None:
@@ -161,8 +161,7 @@ class Host(BaseHost):
             self.forward_packet(pkt)
         else:
             pass
-        
-
+    
     def bcast_for_int(self, intf: str) -> str:
         ip_int = ip_str_to_int(self.int_to_info[intf].ipv4_addrs[0])
         ip_prefix_int = ip_prefix(ip_int, socket.AF_INET, self.int_to_info[intf].ipv4_prefix_len)

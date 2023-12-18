@@ -255,6 +255,7 @@ class TCPSocket(TCPSocketBase):
                 # handle ACK
                 self.handle_ack(pkt)
 
+
     def initialize_seq(self) -> int:
         return random.randint(0, 65535)
 
@@ -286,8 +287,10 @@ class TCPSocket(TCPSocketBase):
 
         if tcp_hdr.flags & TCP_FLAGS_SYN:
             self.base_seq_other = tcp_hdr.seq
-            self.ack = tcp_hdr.seq + 1
+
+            self.ack = tcp_hdr.seq + 1 # Additional
             self.receive_buffer = TCPReceiveBuffer(self.base_seq_other + 1)
+
             self.send_packet(self.base_seq_self, self.base_seq_other + 1, flags=TCP_FLAGS_SYN | TCP_FLAGS_ACK)
             self.state = TCP_STATE_SYN_RECEIVED
 
@@ -311,8 +314,10 @@ class TCPSocket(TCPSocketBase):
         if tcp_hdr.flags & (TCP_FLAGS_SYN | TCP_FLAGS_ACK) and \
                 tcp_hdr.ack == self.base_seq_self + 1:
             self.base_seq_other = tcp_hdr.seq
-            self.ack = tcp_hdr.seq + 1
+
+            self.ack = tcp_hdr.seq + 1 # Additional
             self.receive_buffer = TCPReceiveBuffer(self.base_seq_other + 1)
+
             self.send_packet(self.base_seq_self + 1, self.base_seq_other + 1, flags=TCP_FLAGS_ACK)
             self.state = TCP_STATE_ESTABLISHED
 
@@ -322,7 +327,7 @@ class TCPSocket(TCPSocketBase):
         data = pkt[TCPIP_HEADER_LEN:]
 
         if tcp_hdr.ack == self.base_seq_self + 1:
-            self.ack = tcp_hdr.seq + 1
+            self.ack = tcp_hdr.seq + 1 # Additional
             self.state = TCP_STATE_ESTABLISHED
 
     def continue_connection(self, pkt: bytes) -> None:
