@@ -229,23 +229,23 @@ class TCPSocket(TCPSocketBase):
 
         return sock
     
-    def bypass_handshake(self, base_seq_self: int, base_seq_other: int):
-        '''
-        Bypass the TCP three-way handshake.  Allocate a TCPReceiveBuffer
-        instance, and initialize it with the base sequence number of the peer
-        on the other side of the connection.
+    # def bypass_handshake(self, base_seq_self: int, base_seq_other: int):
+    #     '''
+    #     Bypass the TCP three-way handshake.  Allocate a TCPReceiveBuffer
+    #     instance, and initialize it with the base sequence number of the peer
+    #     on the other side of the connection.
 
-        Normally this is done in in handle_syn() (after the SYN is received)
-        for the server and in handle_synack() (after the SYNACK is received) in
-        the client.
-        '''
-        self.base_seq_self = base_seq_self
-        self.seq = base_seq_self + 1
-        self.send_buffer = TCPSendBuffer(self.base_seq_self + 1)
+    #     Normally this is done in in handle_syn() (after the SYN is received)
+    #     for the server and in handle_synack() (after the SYNACK is received) in
+    #     the client.
+    #     '''
+    #     self.base_seq_self = base_seq_self
+    #     self.seq = base_seq_self + 1
+    #     self.send_buffer = TCPSendBuffer(self.base_seq_self + 1)
 
-        self.base_seq_other = base_seq_other
-        self.ack = base_seq_other + 1
-        self.receive_buffer = TCPReceiveBuffer(self.base_seq_other + 1)
+    #     self.base_seq_other = base_seq_other
+    #     self.ack = base_seq_other + 1
+    #     self.receive_buffer = TCPReceiveBuffer(self.base_seq_other + 1)
 
     def handle_packet(self, pkt: bytes) -> None:
         ip_hdr = IPv4Header.from_bytes(pkt[:IP_HEADER_LEN])
@@ -342,6 +342,9 @@ class TCPSocket(TCPSocketBase):
         data = pkt[TCPIP_HEADER_LEN:]
 
         if tcp_hdr.ack == self.base_seq_self + 1:
+            
+            # Modification to set ack after incorporating receive buffer
+            self.ack = tcp_hdr.seq + 1
             self.state = TCP_STATE_ESTABLISHED
 
 
