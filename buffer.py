@@ -92,3 +92,4 @@ class TCPReceiveBuffer(object):
                 self.base_seq += len(chunk) - (self.base_seq - sequence)
                 del self.buffer[sequence]
         return data, start
+    
