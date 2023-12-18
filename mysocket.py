@@ -84,6 +84,7 @@ class UDPSocket:
         self.send_packet(remote_addr, remote_port, data)
 
 
+
 class TCPSocketBase:
     def handle_packet(self, pkt: bytes) -> None:
         pass
@@ -134,40 +135,14 @@ class TCPListenerSocket(TCPSocketBase):
 
             sock.handle_packet(pkt)
 
-
 class TCPSocket(TCPSocketBase):
-    '''
-    A TCP Connection.  The class is instantiated with an initial state, either
-    CLOSED (client) or LISTEN (server).  It takes the necessary actions to
-    transition to state ESTABLISHED, after which data is exchanged between apps
-    on either side of the connection, with this instance providing the reliable
-    transport.
-
-    The following example is taken directly from RFC 793:
-
-        TCP A                                                TCP B
-
-    1.  CLOSED                                               LISTEN
-
-    2.  SYN-SENT    --> <SEQ=100><CTL=SYN>               --> SYN-RECEIVED
-
-    3.  ESTABLISHED <-- <SEQ=300><ACK=101><CTL=SYN,ACK>  <-- SYN-RECEIVED
-
-    4.  ESTABLISHED --> <SEQ=101><ACK=301><CTL=ACK>       --> ESTABLISHED
-
-    5.  ESTABLISHED --> <SEQ=101><ACK=301><CTL=ACK><DATA> --> ESTABLISHED
-
-    (https://tools.ietf.org/html/rfc793#section-3.4)
-
-    See continue_connection(), initiate_connection(), handle_syn(),
-    handle_syn_ack(), handle_ack(), and handle_data().
-
-    '''
-
     def __init__(self, local_addr: str, local_port: int,
             remote_addr: str, remote_port: int, state: int,
             send_ip_packet_func: callable,
-            notify_on_data_func: callable) -> TCPSocket:
+            notify_on_data_func: callable,
+            fast_retransmit: bool=False, initial_cwnd: int=1000,
+            mss: int=1000,
+            congestion_control: str='none') -> TCPSocket:
 
         # The local/remote address/port information associated with this
         # TCPConnection
@@ -190,36 +165,89 @@ class TCPSocket(TCPSocketBase):
         # Base sequence number for the remote side
         self.base_seq_other = None
 
+        # The largest sequence number that has been acknowledged so far.  This
+        # is the next sequence number expected be be received by the remote
+        # side.
+        self.seq = self.base_seq_self + 1
+
+        # The acknowledgment number to send with any packet.  This represents
+        # the largest in-order sequence number not yet received.
+        self.ack = None
+
+        self.ssthresh = 64000
+
+        # The maximum segment size (MSS), which represents the maximum number
+        # of bytes that may be transmitted in a single TCP segment.
+        self.mss = mss
+
+        # The congestion window (cwnd), which represents the total number of
+        # bytes that may be outstanding (unacknowledged) at one time
+        self.cwnd = initial_cwnd
+        self.cwnd_inc = self.cwnd
+
+        self.congestion_control = congestion_control
+
+        # Send, receive, and ready buffers.  The send buffer is initialized
+        # with our base sequence number.  The receive buffer is initialized
+        # with the base sequence number of the remote side.  The ready buffer
+        # is what is tapped into when recv() is called on the socket.
+        self.send_buffer = TCPSendBuffer(self.base_seq_self + 1) 
+        self.receive_buffer = None
+        self.ready_buffer = b''
+
+        # The number of duplicate acknowledgments
+        self.num_dup_acks = 0
+        self.last_ack = 0
+
+        # Timeout duration in seconds
+        self.timeout = 1
+
+        # Active time instance (Event instance or None)
+        self.timer = None
+
+        # Whether or not we support fast_retransmit (boolean)
+        self.fast_retransmit = fast_retransmit
+
+
     @classmethod
     def connect(cls, local_addr: str, local_port: int,
             remote_addr: str, remote_port: int,
             send_ip_packet_func: callable,
-            notify_on_data_func: callable) -> TCPSocket:
-        '''
-        Create the client side of a new TCP connection.  Instantiate the
-        TCPConnection based on the remote address and remote port (and,
-        optionally, the local address and port) specified.  Call
-        initiate_connection() to send the initial SYN packets.
-        '''
-
+            notify_on_data_func: callable,
+            fast_retransmit: bool=False, initial_cwnd: int=1000,
+            mss: int=1000,
+            congestion_control='none') -> TCPSocket:
         sock = cls(local_addr, local_port,
                 remote_addr, remote_port,
                 TCP_STATE_CLOSED,
-                send_ip_packet_func, notify_on_data_func)
+                send_ip_packet_func, notify_on_data_func,
+                fast_retransmit=fast_retransmit,
+                initial_cwnd=initial_cwnd, mss=mss,
+                congestion_control=congestion_control)
 
         sock.initiate_connection()
 
         return sock
+    
+    def bypass_handshake(self, base_seq_self: int, base_seq_other: int):
+        '''
+        Bypass the TCP three-way handshake.  Allocate a TCPReceiveBuffer
+        instance, and initialize it with the base sequence number of the peer
+        on the other side of the connection.
 
+        Normally this is done in in handle_syn() (after the SYN is received)
+        for the server and in handle_synack() (after the SYNACK is received) in
+        the client.
+        '''
+        self.base_seq_self = base_seq_self
+        self.seq = base_seq_self + 1
+        self.send_buffer = TCPSendBuffer(self.base_seq_self + 1)
+
+        self.base_seq_other = base_seq_other
+        self.ack = base_seq_other + 1
+        self.receive_buffer = TCPReceiveBuffer(self.base_seq_other + 1)
 
     def handle_packet(self, pkt: bytes) -> None:
-        '''
-        Handle an incoming packet corresponding to this connection.  If the
-        connection is not yet established, then continue connection
-        establishment.  For an established connection, handle any payload data
-        (TCP segment) and any data acknowledged.
-        '''
-
         ip_hdr = IPv4Header.from_bytes(pkt[:IP_HEADER_LEN])
         tcp_hdr = TCPHeader.from_bytes(pkt[IP_HEADER_LEN:TCPIP_HEADER_LEN])
         data = pkt[TCPIP_HEADER_LEN:]
@@ -241,7 +269,6 @@ class TCPSocket(TCPSocketBase):
         Initialize the sequence number used by our side of the connection.
         '''
 
-        #XXX
         return random.randint(0, 65535)
 
 
@@ -319,32 +346,24 @@ class TCPSocket(TCPSocketBase):
 
 
     def continue_connection(self, pkt: bytes) -> None:
-        '''
-        Continue connection establishment, based on the current state.  This is
-        method is called when a client or server receives a TCP packet and it
-        is in a state other than TCP_STATE_CLOSED or TCP_STATE_ESTABLISHED.
+          if self.state == TCP_STATE_LISTEN:
+              self.handle_syn(pkt)
+          elif self.state == TCP_STATE_SYN_SENT:
+              self.handle_synack(pkt)
+          elif self.state == TCP_STATE_SYN_RECEIVED:
+              self.handle_ack_after_synack(pkt)
 
-        pkt: the incoming packet, a bytes instance
-        '''
-
-        if self.state == TCP_STATE_LISTEN:
-            self.handle_syn(pkt)
-        elif self.state == TCP_STATE_SYN_SENT:
-            self.handle_synack(pkt)
-        elif self.state == TCP_STATE_SYN_RECEIVED:
-            self.handle_ack_after_synack(pkt)
-
-        if self.state == TCP_STATE_ESTABLISHED:
-            pass
+          if self.state == TCP_STATE_ESTABLISHED:
+              pass
 
 
     def send_data(self, data: bytes, flags: int=0) -> None:
         pass
 
+    
     @classmethod
     def create_packet(cls, src: str, sport: int, dst: str, dport: int,
             seq: int, ack: int, flags: int, data: bytes=b'') -> bytes:
-
         data_len = len(data)
         pkt_len = TCPIP_HEADER_LEN + data_len
         pkt_ttl = 64
@@ -360,6 +379,7 @@ class TCPSocket(TCPSocketBase):
 
         return ip_hdr_bytes + tcp_hdr_bytes + data
 
+
     def send_packet(self, seq: int, ack: int, flags: int,
             data: bytes=b'') -> None:
         pkt = self.create_packet(self._local_addr, self._local_port,
@@ -367,8 +387,143 @@ class TCPSocket(TCPSocketBase):
                 seq, ack, flags, data)
         self._send_ip_packet(pkt)
 
+    def relative_seq_other(self, seq: int) -> int:
+        '''
+        Return the specified sequence number (int) relative to the base
+        sequence number for the other side of the connection.
+
+        seq: An int value to be made relative to the base sequence number.
+        '''
+
+        return seq - self.base_seq_other
+
+
+    def relative_seq_self(self, seq: int) -> int:
+        '''
+        Return the specified sequence number (int) relative to our base
+        sequence number.
+
+        seq: An int value to be made relative to the base sequence number.
+        '''
+
+        return seq - self.base_seq_self
+
+    def send_if_possible(self) -> int:
+        while self.send_buffer.bytes_outstanding() < self.cwnd:
+            # get one packet's worth of data and send it
+            data, seq = self.send_buffer.get(self.mss)
+            if not data:
+                return
+
+            self.send_packet(seq, self.ack, TCP_FLAGS_ACK, data)
+
+            # set a timer
+            if self.timer is None:
+                self.start_timer()
+
+
+    def send(self, data: bytes) -> None:
+        self.send_buffer.put(data)
+        self.send_if_possible()
+
+    def recv(self, num: int) -> bytes:
+        data = self.ready_buffer[:num]
+        self.ready_buffer = self.ready_buffer[num:]
+        return data
+
     def handle_data(self, pkt: bytes) -> None:
-        pass
+        ip_hdr = IPv4Header.from_bytes(pkt[:IP_HEADER_LEN])
+        tcp_hdr = TCPHeader.from_bytes(pkt[IP_HEADER_LEN:TCPIP_HEADER_LEN])
+        data = pkt[TCPIP_HEADER_LEN:]
+
+        self.receive_buffer.put(data, tcp_hdr.seq)
+
+        # Use the get to tell us the ACK number we should put in the ACK
+        data, seq = self.receive_buffer.get()
+        self.ack = seq + len(data)
+        self.ready_buffer += data
+
+        # always send an ACK
+        self.send_ack()
+
+        # notify the application that there is data
+        if data:
+            self._notify_on_data()
 
     def handle_ack(self, pkt: bytes) -> None:
-        pass
+        ip_hdr = IPv4Header.from_bytes(pkt[:IP_HEADER_LEN])
+        tcp_hdr = TCPHeader.from_bytes(pkt[IP_HEADER_LEN:TCPIP_HEADER_LEN])
+        data = pkt[TCPIP_HEADER_LEN:]
+
+        # if not acking new data, ignore it
+        if not tcp_hdr.ack >= self.seq:
+            return
+
+        if tcp_hdr.ack == self.last_ack:
+            # duplicate ACK
+            self.num_dup_acks += 1
+        else:
+            self.last_ack = tcp_hdr.ack
+            self.num_dup_acks = 0
+
+        if self.fast_retransmit and self.num_dup_acks == 3:
+            self.num_dup_acks = 0
+            self.cancel_timer()
+            self.retransmit()
+            return
+
+        bytes_ackd = tcp_hdr.ack - self.seq
+
+        # remember the highest acked sequence
+        self.seq = tcp_hdr.ack
+
+        # slide the receive window 
+        self.send_buffer.slide(tcp_hdr.ack)
+
+        # kill the retransmit timer
+        self.cancel_timer()
+
+        # restart the retransmit timer if old data is still outstanding
+        if self.send_buffer.bytes_outstanding() > 0:
+            self.start_timer()
+
+        if self.congestion_control == 'tahoe':
+            if self.cwnd < self.ssthresh:
+                self.cwnd_inc += bytes_ackd
+                while self.cwnd_inc > self.mss:
+                    self.cwnd += self.mss
+                    self.cwnd_inc -= self.mss
+            else:
+                self.cwnd_inc += bytes_ackd*self.mss/(self.cwnd_inc + self.cwnd)
+                while self.cwnd_inc > self.mss:
+                    self.cwnd += self.mss
+                    self.cwnd_inc -= self.mss
+
+        # send more if possible
+        self.send_if_possible()
+
+
+    def retransmit(self) -> None:
+        # retransmit one MSS
+        data, seq = self.send_buffer.get_for_resend(self.mss)
+        self.send_packet(seq, self.ack, flags=TCP_FLAGS_ACK, data=data)
+
+        if self.congestion_control == 'tahoe':
+            self.ssthresh = self.cwnd // 2
+            self.cwnd = self.cwnd_inc = self.mss
+
+        # restart the timer
+        self.start_timer()
+
+    def start_timer(self) -> None:
+        loop = asyncio.get_event_loop()
+        self.timer = loop.call_later(self.timeout, self.retransmit)
+
+    def cancel_timer(self):
+        if not self.timer:
+            return
+        self.timer.cancel()
+        self.timer = None
+
+    def send_ack(self):
+        self.send_packet(self.seq, self.ack, TCP_FLAGS_ACK)

@@ -154,9 +154,24 @@ class DVRouter(TransportHost):
         # get neighbor costs
         neighbor_costs = dict([(n, 1) for n in self.neighbor_dvs])
 
-        # initialize DV with distance 0 to own IP addresses
-        dv = dict([(intinfo.ipv4_addrs[0], 0) \
-                for intinfo in self.int_to_info.values() if intinfo.ipv4_addrs])
+       # initialize DV with distance 0 to own IP addresses
+        dv = {}
+      
+        # NEW WAY: Translate ips address to correlating prefixes
+        for intinfo in self.int_to_info.values():
+            if intinfo.ipv4_addrs:
+                ip_addr = intinfo.ipv4_addrs[0]
+                prefix_len = intinfo.ipv4_prefix_len
+
+                int = ip_str_to_int(ip_addr)
+                prefix_int = ip_prefix(int, 
+                                       socket.AF_INET, 
+                                       prefix_len
+                                       )
+                
+                prefix_str = ip_int_to_str(prefix_int, socket.AF_INET) + "/" + str(prefix_len)
+
+                dv[prefix_str] = 0 # Store as prefix
 
         for neighbor in self.neighbor_dvs:
             table = self.neighbor_dvs[neighbor]
